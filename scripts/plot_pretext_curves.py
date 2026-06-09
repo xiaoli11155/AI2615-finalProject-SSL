@@ -9,7 +9,7 @@ import matplotlib
 
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
-from matplotlib.ticker import MaxNLocator
+from matplotlib.ticker import MultipleLocator
 
 
 def parse_args():
@@ -19,6 +19,7 @@ def parse_args():
     parser.add_argument("--datasets", nargs="+", default=["cifar10", "cifar100", "tiny-imagenet"])
     parser.add_argument("--metric", default="val_top1")
     parser.add_argument("--output-dir", default="outputs/plots")
+    parser.add_argument("--report-style", action="store_true")
     return parser.parse_args()
 
 
@@ -32,8 +33,23 @@ def metric_series(history, metric: str):
     return xs, ys
 
 
-def set_integer_epoch_ticks(ax):
-    ax.xaxis.set_major_locator(MaxNLocator(integer=True))
+def set_epoch_ticks(ax):
+    ax.xaxis.set_major_locator(MultipleLocator(5))
+
+
+def apply_pretext_style(report_style: bool):
+    if not report_style:
+        return
+    plt.rcParams.update(
+        {
+            "font.size": 11,
+            "axes.titlesize": 12,
+            "axes.labelsize": 12,
+            "xtick.labelsize": 11,
+            "ytick.labelsize": 11,
+            "legend.fontsize": 11,
+        }
+    )
 
 
 def load_run_series(pretext_root: Path, dataset: str, task: str, metric: str):
@@ -45,7 +61,7 @@ def load_run_series(pretext_root: Path, dataset: str, task: str, metric: str):
 
 
 def plot_dataset(dataset: str, tasks: list[str], pretext_root: Path, metric: str, output_dir: Path):
-    fig, ax = plt.subplots(figsize=(7, 5))
+    fig, ax = plt.subplots(figsize=(6.6, 4.8))
     colors = {
         "jigsaw": "#1f77b4",
         "rotation": "#ff7f0e",
@@ -62,9 +78,10 @@ def plot_dataset(dataset: str, tasks: list[str], pretext_root: Path, metric: str
     ax.set_title(dataset)
     ax.set_xlabel("Epoch")
     ax.set_ylabel(metric)
-    set_integer_epoch_ticks(ax)
+    set_epoch_ticks(ax)
     ax.grid(True, alpha=0.25)
     ax.legend(frameon=False)
+    fig.tight_layout(pad=0.8)
 
     output_dir.mkdir(parents=True, exist_ok=True)
     out_path = output_dir / f"pretext_{dataset}_{metric}_by_task.png"
@@ -75,6 +92,7 @@ def plot_dataset(dataset: str, tasks: list[str], pretext_root: Path, metric: str
 
 def main():
     args = parse_args()
+    apply_pretext_style(args.report_style)
     pretext_root = Path(args.pretext_dir)
     output_dir = Path(args.output_dir)
 

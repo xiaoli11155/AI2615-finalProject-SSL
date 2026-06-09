@@ -9,7 +9,7 @@ import matplotlib
 
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
-from matplotlib.ticker import MaxNLocator
+from matplotlib.ticker import MultipleLocator
 
 
 def parse_args():
@@ -20,6 +20,7 @@ def parse_args():
     parser.add_argument("--shots", nargs="+", type=int, default=[0, 10, 100])
     parser.add_argument("--metric", default="val_top1")
     parser.add_argument("--output-dir", default="outputs/plots")
+    parser.add_argument("--report-style", action="store_true")
     return parser.parse_args()
 
 
@@ -33,8 +34,24 @@ def metric_series(history, metric: str):
     return xs, ys
 
 
-def set_integer_epoch_ticks(ax):
-    ax.xaxis.set_major_locator(MaxNLocator(integer=True))
+def set_epoch_ticks(ax):
+    ax.xaxis.set_major_locator(MultipleLocator(5))
+
+
+def apply_finetune_style(report_style: bool):
+    if not report_style:
+        return
+    plt.rcParams.update(
+        {
+            "font.size": 12,
+            "axes.titlesize": 13,
+            "axes.labelsize": 14,
+            "xtick.labelsize": 12,
+            "ytick.labelsize": 12,
+            "legend.fontsize": 12,
+            "figure.titlesize": 14,
+        }
+    )
 
 
 def find_single_run(root: Path, pattern: str):
@@ -52,8 +69,10 @@ def load_run_series(dataset_root: Path, run_pattern: str, metric: str):
     return metric_series(history, metric), run_dir.name
 
 
-def plot_task(task: str, datasets: list[str], shots: list[int], finetune_root: Path, metric: str, output_dir: Path):
-    fig, axes = plt.subplots(1, len(datasets), figsize=(6 * len(datasets), 5), sharey=True)
+def plot_task(task: str, datasets: list[str], shots: list[int], finetune_root: Path, metric: str, output_dir: Path, report_style: bool):
+    fig_width = 4.5 * len(datasets) if report_style else 6 * len(datasets)
+    fig_height = 5.8 if report_style else 5
+    fig, axes = plt.subplots(1, len(datasets), figsize=(fig_width, fig_height), sharey=True)
     if len(datasets) == 1:
         axes = [axes]
 
@@ -95,14 +114,15 @@ def plot_task(task: str, datasets: list[str], shots: list[int], finetune_root: P
 
         ax.set_title(dataset)
         ax.set_xlabel("Epoch")
-        set_integer_epoch_ticks(ax)
+        set_epoch_ticks(ax)
         ax.grid(True, alpha=0.25)
 
     axes[0].set_ylabel(metric)
     handles, labels = axes[0].get_legend_handles_labels()
-    fig.legend(handles, labels, loc="lower center", ncol=3, frameon=False, bbox_to_anchor=(0.5, -0.02))
-    fig.suptitle(f"Finetune Curves: {task}", fontsize=14)
-    fig.tight_layout(rect=(0, 0.06, 1, 0.95))
+    legend_cols = 3 if report_style else 3
+    fig.legend(handles, labels, loc="lower center", ncol=legend_cols, frameon=False, bbox_to_anchor=(0.5, -0.02))
+    fig.suptitle(f"Finetune Curves: {task}", y=0.965)
+    fig.tight_layout(rect=(0, 0.07, 1, 0.975))
 
     output_dir.mkdir(parents=True, exist_ok=True)
     out_path = output_dir / f"finetune_{task}_{metric}.png"
@@ -111,9 +131,12 @@ def plot_task(task: str, datasets: list[str], shots: list[int], finetune_root: P
     return out_path
 
 
-def plot_dataset(dataset: str, tasks: list[str], shots: list[int], finetune_root: Path, metric: str, output_dir: Path):
-    shots = [shot for shot in shots if shot != 10]
-    fig, axes = plt.subplots(1, len(shots), figsize=(6 * len(shots), 5), sharey=True)
+def plot_dataset(dataset: str, tasks: list[str], shots: list[int], finetune_root: Path, metric: str, output_dir: Path, report_style: bool):
+    shot_order = {0: 0, 100: 1, 10: 2}
+    shots = sorted(shots, key=lambda shot: shot_order.get(shot, shot))
+    fig_width = 4.5 * len(shots) if report_style else 6 * len(shots)
+    fig_height = 5.8 if report_style else 5
+    fig, axes = plt.subplots(1, len(shots), figsize=(fig_width, fig_height), sharey=True)
     if len(shots) == 1:
         axes = [axes]
 
@@ -155,14 +178,14 @@ def plot_dataset(dataset: str, tasks: list[str], shots: list[int], finetune_root
 
         ax.set_title(f"{dataset}, shot={shot}")
         ax.set_xlabel("Epoch")
-        set_integer_epoch_ticks(ax)
+        set_epoch_ticks(ax)
         ax.grid(True, alpha=0.25)
 
     axes[0].set_ylabel(metric)
     handles, labels = axes[0].get_legend_handles_labels()
     fig.legend(handles, labels, loc="lower center", ncol=4, frameon=False, bbox_to_anchor=(0.5, -0.02))
-    fig.suptitle(f"Finetune Curves by Pretext: {dataset}", fontsize=14)
-    fig.tight_layout(rect=(0, 0.06, 1, 0.95))
+    fig.suptitle(f"Finetune Curves by Pretext: {dataset}", y=0.965)
+    fig.tight_layout(rect=(0, 0.07, 1, 0.975))
 
     output_dir.mkdir(parents=True, exist_ok=True)
     out_path = output_dir / f"finetune_{dataset}_{metric}_by_pretext.png"
@@ -173,6 +196,7 @@ def plot_dataset(dataset: str, tasks: list[str], shots: list[int], finetune_root
 
 def main():
     args = parse_args()
+    apply_finetune_style(args.report_style)
     finetune_root = Path(args.finetune_dir)
     output_dir = Path(args.output_dir)
 
@@ -185,6 +209,7 @@ def main():
             finetune_root=finetune_root,
             metric=args.metric,
             output_dir=output_dir,
+            report_style=args.report_style,
         )
         generated.append(out_path)
 
@@ -196,6 +221,7 @@ def main():
             finetune_root=finetune_root,
             metric=args.metric,
             output_dir=output_dir,
+            report_style=args.report_style,
         )
         generated.append(out_path)
 
