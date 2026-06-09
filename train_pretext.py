@@ -14,8 +14,9 @@ from ssl_project.utils.seed import seed_everything
 
 
 def parse_args():
-    parser = argparse.ArgumentParser(description="Self-supervised pretext training on Tiny ImageNet.")
+    parser = argparse.ArgumentParser(description="Self-supervised pretext training.")
     parser.add_argument("--data-dir", default="data/imagenet")
+    parser.add_argument("--dataset", choices=["tiny-imagenet", "cifar10", "cifar100"], default="tiny-imagenet")
     parser.add_argument("--task", choices=["rotation", "jigsaw", "relative_patch"], default="rotation")
     parser.add_argument("--epochs", type=int, default=20)
     parser.add_argument("--batch-size", type=int, default=128)
@@ -38,6 +39,7 @@ def main():
     dataset, num_classes = build_pretext_dataset(
         args.data_dir,
         args.task,
+        dataset_name=args.dataset,
         image_size=args.image_size,
         jigsaw_permutations=args.jigsaw_permutations,
         seed=args.seed,
@@ -61,12 +63,12 @@ def main():
         pin_memory=True,
     )
 
-    model = PretextModel(task=args.task, num_classes=num_classes).to(device)
+    model = PretextModel(task=args.task, num_classes=num_classes, small_images=True).to(device)
     criterion = nn.CrossEntropyLoss()
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=args.epochs)
 
-    run_dir = Path(args.output_dir) / f"{args.task}_bs{args.batch_size}_lr{args.lr}_ep{args.epochs}"
+    run_dir = Path(args.output_dir) / args.dataset / f"{args.task}_bs{args.batch_size}_lr{args.lr}_ep{args.epochs}"
     run_dir.mkdir(parents=True, exist_ok=True)
     history = []
     best_top1 = -1.0

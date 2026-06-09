@@ -1,6 +1,6 @@
 # AI2612 Self-Supervised Learning Project
 
-This project implements ResNet-18 based self-supervised pretraining on Tiny ImageNet and downstream few-shot classification fine-tuning.
+This project implements ResNet-18 based self-supervised pretraining on Tiny ImageNet, CIFAR-10, and CIFAR-100, plus downstream few-shot classification fine-tuning.
 
 Implemented pretext tasks:
 
@@ -28,12 +28,19 @@ or:
 data/imagenet/tiny-imagenet-200/train/...
 ```
 
+Put CIFAR data under one of these layouts:
+
+```text
+data/cifar/cifar-10-batches-py
+data/cifar/cifar-100-python
+```
+
 ## Self-Supervised Pretraining
 
 ```bash
-python train_pretext.py --data-dir data/imagenet --task rotation --epochs 20 --batch-size 128 --lr 1e-3
-python train_pretext.py --data-dir data/imagenet --task jigsaw --epochs 20 --batch-size 128 --lr 1e-3
-python train_pretext.py --data-dir data/imagenet --task relative_patch --epochs 20 --batch-size 128 --lr 1e-3
+python train_pretext.py --dataset tiny-imagenet --data-dir data/tiny-imagenet-200 --task rotation --epochs 20 --batch-size 128 --lr 1e-3
+python train_pretext.py --dataset cifar10 --data-dir data/cifar --task rotation --epochs 20 --batch-size 128 --lr 1e-3 --image-size 32
+python train_pretext.py --dataset cifar100 --data-dir data/cifar --task jigsaw --epochs 20 --batch-size 128 --lr 1e-3 --image-size 32
 ```
 
 Checkpoints and per-epoch JSON logs are saved under `outputs/pretext/`.
@@ -43,21 +50,28 @@ Checkpoints and per-epoch JSON logs are saved under `outputs/pretext/`.
 Fine-tune a self-supervised encoder with 10 labeled images per class:
 
 ```bash
-python finetune.py --data-dir data/imagenet --pretrained outputs/pretext/rotation_bs128_lr0.001_ep20/best.pt --shots-per-class 10 --epochs 30 --batch-size 128 --lr 1e-3
+python finetune.py --dataset tiny-imagenet --data-dir data/tiny-imagenet-200 --pretrained outputs/pretext/tiny-imagenet/rotation_bs128_lr0.001_ep20/best.pt --shots-per-class 10 --epochs 30 --batch-size 128 --lr 1e-3
 ```
 
 Train the same classifier from random initialization:
 
 ```bash
-python finetune.py --data-dir data/imagenet --shots-per-class 10 --epochs 30 --batch-size 128 --lr 1e-3
+python finetune.py --dataset cifar10 --data-dir data/cifar --pretrained outputs/pretext/cifar10/rotation_bs128_lr0.001_ep20/best.pt --shots-per-class 10 --epochs 30 --batch-size 128 --lr 1e-3 --image-size 32
+python finetune.py --dataset cifar10 --data-dir data/cifar --shots-per-class 10 --epochs 30 --batch-size 128 --lr 1e-3 --image-size 32
 ```
 
-Fine-tuning reports Top-1 and Top-5 accuracy on the Tiny ImageNet validation split.
+Adapter tuning freezes the backbone and trains lightweight residual adapters plus the classifier:
+
+```bash
+python finetune.py --dataset cifar10 --data-dir data/cifar --pretrained outputs/pretext/cifar10/jigsaw_bs128_lr0.001_ep20/best.pt --shots-per-class 100 --epochs 30 --batch-size 128 --lr 1e-3 --image-size 32 --adapter-dim 16
+```
+
+Fine-tuning reports Top-1 and Top-5 accuracy on the held-out validation/test split.
 
 ## Hyper-Parameter Sweep
 
 ```bash
-python run_experiments.py --data-dir data/imagenet --tasks rotation jigsaw relative_patch --batch-sizes 64 128 --lrs 1e-3 3e-4 --pretext-epochs 20 --finetune-epochs 30
+python run_experiments.py --dataset tiny-imagenet --data-dir data/tiny-imagenet-200 --tasks rotation jigsaw relative_patch --batch-sizes 64 128 --lrs 1e-3 3e-4 --pretext-epochs 20 --finetune-epochs 30
 ```
 
 The sweep writes `outputs/experiment_summary.csv`, which is suitable for the report section comparing batch size, learning rate, training time, and accuracy.

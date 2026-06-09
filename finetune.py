@@ -14,10 +14,12 @@ from ssl_project.utils.seed import seed_everything
 
 
 def parse_args():
-    parser = argparse.ArgumentParser(description="Fine-tune on Tiny ImageNet classification.")
+    parser = argparse.ArgumentParser(description="Fine-tune on image classification.")
     parser.add_argument("--data-dir", default="data/imagenet")
+    parser.add_argument("--dataset", choices=["tiny-imagenet", "cifar10", "cifar100"], default="tiny-imagenet")
     parser.add_argument("--pretrained", default=None, help="Path to SSL checkpoint. Omit for random init.")
     parser.add_argument("--freeze-encoder", action="store_true")
+    parser.add_argument("--adapter-dim", type=int, default=0, help="Enable adapter tuning with this bottleneck width.")
     parser.add_argument("--shots-per-class", type=int, default=10)
     parser.add_argument("--epochs", type=int, default=30)
     parser.add_argument("--batch-size", type=int, default=128)
@@ -33,9 +35,15 @@ def parse_args():
 
 def main():
     args = parse_args()
+    if args.freeze_encoder and args.adapter_dim > 0:
+        raise ValueError("Use either --freeze-encoder or --adapter-dim, not both.")
     seed_everything(args.seed)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    train_set, val_set, num_classes = build_classification_datasets(args.data_dir, args.image_size)
+    train_set, val_set, num_classes = build_classification_datasets(
+        args.data_dir,
+        dataset_name=args.dataset,
+        image_size=args.image_size,
+    )
     train_set = few_shot_subset(train_set, args.shots_per_class, args.seed)
     train_loader = DataLoader(
         train_set,
@@ -52,14 +60,21 @@ def main():
         pin_memory=True,
     )
 
-    model = ClassificationModel(num_classes=num_classes).to(device)
+    model = ClassificationModel(
+        num_classes=num_classes,
+        small_images=True,
+        adapter_dim=args.adapter_dim,
+    ).to(device)
     init_name = "random"
     if args.pretrained:
         load_encoder_from_pretext(model, args.pretrained)
         init_name = Path(args.pretrained).parent.name
     if args.freeze_encoder:
-        for param in model.encoder.parameters():
-            param.requires_grad = False
+        model.freeze_encoder()
+        init_name = f"{init_name}_frozen"
+    elif args.adapter_dim > 0:
+        model.enable_adapter_tuning()
+        init_name = f"{init_name}_adapter{args.adapter_dim}"
 
     criterion = nn.CrossEntropyLoss()
     optimizer = torch.optim.AdamW(
@@ -68,7 +83,7 @@ def main():
         weight_decay=args.weight_decay,
     )
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=args.epochs)
-    run_dir = Path(args.output_dir) / f"{init_name}_shots{args.shots_per_class}_bs{args.batch_size}_lr{args.lr}"
+    run_dir = Path(args.output_dir) / args.dataset / f"{init_name}_shots{args.shots_per_class}_bs{args.batch_size}_lr{args.lr}"
     run_dir.mkdir(parents=True, exist_ok=True)
 
     history = []

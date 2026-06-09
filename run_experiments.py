@@ -9,6 +9,7 @@ from pathlib import Path
 def parse_args():
     parser = argparse.ArgumentParser(description="Run a compact SSL hyper-parameter sweep.")
     parser.add_argument("--data-dir", default="data/imagenet")
+    parser.add_argument("--dataset", choices=["tiny-imagenet", "cifar10", "cifar100"], default="tiny-imagenet")
     parser.add_argument("--tasks", nargs="+", default=["rotation", "jigsaw", "relative_patch"])
     parser.add_argument("--batch-sizes", nargs="+", type=int, default=[64, 128])
     parser.add_argument("--lrs", nargs="+", type=float, default=[1e-3, 3e-4])
@@ -47,6 +48,8 @@ def main():
                         "train_pretext.py",
                         "--data-dir",
                         args.data_dir,
+                        "--dataset",
+                        args.dataset,
                         "--task",
                         task,
                         "--epochs",
@@ -60,7 +63,7 @@ def main():
                         *maybe_amp(args),
                     ]
                 )
-                pretext_dir = Path("outputs/pretext") / f"{task}_bs{batch_size}_lr{lr}_ep{args.pretext_epochs}"
+                pretext_dir = Path("outputs/pretext") / args.dataset / f"{task}_bs{batch_size}_lr{lr}_ep{args.pretext_epochs}"
                 ckpt = pretext_dir / "best.pt"
                 run(
                     [
@@ -68,6 +71,8 @@ def main():
                         "finetune.py",
                         "--data-dir",
                         args.data_dir,
+                        "--dataset",
+                        args.dataset,
                         "--pretrained",
                         str(ckpt),
                         "--epochs",
@@ -101,6 +106,8 @@ def main():
             "finetune.py",
             "--data-dir",
             args.data_dir,
+            "--dataset",
+            args.dataset,
             "--epochs",
             str(args.finetune_epochs),
             "--batch-size",
@@ -114,7 +121,7 @@ def main():
             *maybe_amp(args),
         ]
     )
-    random_dir = Path("outputs/finetune") / f"random_shots{args.shots_per_class}_bs{args.batch_sizes[0]}_lr{args.lrs[0]}"
+    random_dir = Path("outputs/finetune") / args.dataset / f"random_shots{args.shots_per_class}_bs{args.batch_sizes[0]}_lr{args.lrs[0]}"
     rows.append(
         {
             "init": "random",

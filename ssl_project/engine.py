@@ -8,6 +8,20 @@ from tqdm import tqdm
 from ssl_project.utils.metrics import topk_accuracy
 
 
+def build_grad_scaler(device, amp: bool):
+    enabled = amp and device.type == "cuda"
+    if hasattr(torch, "amp") and hasattr(torch.amp, "GradScaler"):
+        return torch.amp.GradScaler("cuda", enabled=enabled)
+    return torch.cuda.amp.GradScaler(enabled=enabled)
+
+
+def autocast_context(device, amp: bool):
+    enabled = amp and device.type == "cuda"
+    if hasattr(torch, "amp") and hasattr(torch.amp, "autocast"):
+        return torch.amp.autocast("cuda", enabled=enabled)
+    return torch.cuda.amp.autocast(enabled=enabled)
+
+
 def move_batch(batch, device):
     inputs, targets = batch
     if isinstance(inputs, (tuple, list)):
@@ -23,12 +37,12 @@ def train_one_epoch(model, loader, criterion, optimizer, device, epoch, amp=Fals
     total_top1 = 0.0
     total_seen = 0
     start = time.time()
-    scaler = torch.amp.GradScaler("cuda", enabled=amp and device.type == "cuda")
+    scaler = build_grad_scaler(device, amp)
     pbar = tqdm(loader, desc=f"train epoch {epoch}", leave=False)
     for batch in pbar:
         inputs, targets = move_batch(batch, device)
         optimizer.zero_grad(set_to_none=True)
-        with torch.amp.autocast("cuda", enabled=amp and device.type == "cuda"):
+        with autocast_context(device, amp):
             logits = model(inputs)
             loss = criterion(logits, targets)
         scaler.scale(loss).backward()

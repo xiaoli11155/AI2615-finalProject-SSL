@@ -12,11 +12,40 @@ from torchvision.transforms import functional as F
 
 TINY_MEAN = (0.4802, 0.4481, 0.3975)
 TINY_STD = (0.2302, 0.2265, 0.2262)
+CIFAR10_MEAN = (0.4914, 0.4822, 0.4465)
+CIFAR10_STD = (0.2470, 0.2435, 0.2616)
+CIFAR100_MEAN = (0.5071, 0.4867, 0.4408)
+CIFAR100_STD = (0.2675, 0.2565, 0.2761)
 
 
 def _pil_loader(path):
     with open(path, "rb") as f:
         return Image.open(f).convert("RGB")
+
+
+def _dataset_key(name: str) -> str:
+    key = name.lower()
+    aliases = {
+        "tiny-imagenet": "tiny-imagenet",
+        "tiny_imagenet": "tiny-imagenet",
+        "tinyimagenet": "tiny-imagenet",
+        "cifar10": "cifar10",
+        "cifar-10": "cifar10",
+        "cifar100": "cifar100",
+        "cifar-100": "cifar100",
+    }
+    if key not in aliases:
+        raise ValueError(f"Unsupported dataset: {name}")
+    return aliases[key]
+
+
+def _stats_for_dataset(dataset_name: str):
+    key = _dataset_key(dataset_name)
+    if key == "tiny-imagenet":
+        return TINY_MEAN, TINY_STD
+    if key == "cifar10":
+        return CIFAR10_MEAN, CIFAR10_STD
+    return CIFAR100_MEAN, CIFAR100_STD
 
 
 def find_tiny_root(data_dir: str | Path) -> Path:
@@ -58,7 +87,7 @@ class TinyImageNetVal(Dataset):
         return image, target
 
 
-def train_transform(image_size: int = 64):
+def tiny_train_transform(image_size: int = 64):
     return transforms.Compose(
         [
             transforms.RandomResizedCrop(image_size, scale=(0.6, 1.0)),
@@ -70,7 +99,7 @@ def train_transform(image_size: int = 64):
     )
 
 
-def eval_transform(image_size: int = 64):
+def tiny_eval_transform(image_size: int = 64):
     return transforms.Compose(
         [
             transforms.Resize((image_size, image_size)),
@@ -80,10 +109,59 @@ def eval_transform(image_size: int = 64):
     )
 
 
-def build_classification_datasets(data_dir, image_size=64):
+def cifar_train_transform(dataset_name: str, image_size: int = 32):
+    mean, std = _stats_for_dataset(dataset_name)
+    return transforms.Compose(
+        [
+            transforms.Resize((image_size, image_size)),
+            transforms.RandomCrop(image_size, padding=4),
+            transforms.RandomHorizontalFlip(),
+            transforms.ToTensor(),
+            transforms.Normalize(mean, std),
+        ]
+    )
+
+
+def cifar_eval_transform(dataset_name: str, image_size: int = 32):
+    mean, std = _stats_for_dataset(dataset_name)
+    return transforms.Compose(
+        [
+            transforms.Resize((image_size, image_size)),
+            transforms.ToTensor(),
+            transforms.Normalize(mean, std),
+        ]
+    )
+
+
+def _resolve_cifar_root(data_dir: str | Path) -> Path:
+    root = Path(data_dir)
+    candidates = [root, root / "cifar", root / "cifar10", root / "cifar100"]
+    for candidate in candidates:
+        if candidate.exists():
+            return candidate
+    raise FileNotFoundError(f"Could not find CIFAR data directory under {root}.")
+
+
+def _cifar_dataset_class(dataset_name: str):
+    key = _dataset_key(dataset_name)
+    if key == "cifar10":
+        return datasets.CIFAR10
+    if key == "cifar100":
+        return datasets.CIFAR100
+    raise ValueError(f"CIFAR dataset expected, got {dataset_name}")
+
+
+def build_classification_datasets(data_dir, dataset_name="tiny-imagenet", image_size=64):
+    key = _dataset_key(dataset_name)
+    if key in {"cifar10", "cifar100"}:
+        root = _resolve_cifar_root(data_dir)
+        dataset_cls = _cifar_dataset_class(key)
+        train = dataset_cls(root=root, train=True, transform=cifar_train_transform(key, image_size), download=False)
+        val = dataset_cls(root=root, train=False, transform=cifar_eval_transform(key, image_size), download=False)
+        return train, val, 10 if key == "cifar10" else 100
     root = find_tiny_root(data_dir)
-    train = datasets.ImageFolder(root / "train", transform=train_transform(image_size))
-    val = TinyImageNetVal(root, transform=eval_transform(image_size))
+    train = datasets.ImageFolder(root / "train", transform=tiny_train_transform(image_size))
+    val = TinyImageNetVal(root, transform=tiny_eval_transform(image_size))
     return train, val, len(train.classes)
 
 
@@ -197,9 +275,60 @@ class RelativePatchDataset(Dataset):
         return (self.to_tensor(anchor), self.to_tensor(neighbor)), label
 
 
-def build_pretext_dataset(data_dir, task, image_size=64, jigsaw_permutations=30, seed=0):
+class RelativePatchArrayDataset(Dataset):
+    OFFSETS = [(-1, -1), (-1, 0), (-1, 1), (0, -1), (0, 1), (1, -1), (1, 0), (1, 1)]
+
+    def __init__(self, base_dataset, dataset_name: str, patch_size=16, image_size=32):
+        self.base_dataset = base_dataset
+        self.patch_size = patch_size
+        self.image_size = image_size
+        mean, std = _stats_for_dataset(dataset_name)
+        self.to_tensor = transforms.Compose(
+            [
+                transforms.ToTensor(),
+                transforms.Normalize(mean, std),
+            ]
+        )
+
+    def __len__(self):
+        return len(self.base_dataset)
+
+    def __getitem__(self, index):
+        image, _ = self.base_dataset[index]
+        if not isinstance(image, Image.Image):
+            image = transforms.ToPILImage()(image)
+        image = F.resize(image, [self.image_size, self.image_size])
+        label = random.randrange(8)
+        dy, dx = self.OFFSETS[label]
+        center = self.image_size // 2 - self.patch_size // 2
+        step = self.patch_size
+        jitter = max(1, self.patch_size // 4)
+        ay = center + random.randint(-jitter, jitter)
+        ax = center + random.randint(-jitter, jitter)
+        by = max(0, min(self.image_size - self.patch_size, ay + dy * step))
+        bx = max(0, min(self.image_size - self.patch_size, ax + dx * step))
+        anchor = F.crop(image, ay, ax, self.patch_size, self.patch_size)
+        neighbor = F.crop(image, by, bx, self.patch_size, self.patch_size)
+        return (self.to_tensor(anchor), self.to_tensor(neighbor)), label
+
+
+def build_pretext_dataset(data_dir, task, dataset_name="tiny-imagenet", image_size=64, jigsaw_permutations=30, seed=0):
+    key = _dataset_key(dataset_name)
+    if key in {"cifar10", "cifar100"}:
+        root = _resolve_cifar_root(data_dir)
+        dataset_cls = _cifar_dataset_class(key)
+        base = dataset_cls(root=root, train=True, transform=cifar_train_transform(key, image_size), download=False)
+        if task == "rotation":
+            return RotationDataset(base), 4
+        if task == "jigsaw":
+            return JigsawDataset(base, num_permutations=jigsaw_permutations, seed=seed), jigsaw_permutations
+        if task == "relative_patch":
+            raw = dataset_cls(root=root, train=True, download=False)
+            patch_size = max(8, image_size // 2)
+            return RelativePatchArrayDataset(raw, key, patch_size=patch_size, image_size=image_size), 8
+        raise ValueError(f"Unknown pretext task: {task}")
     root = find_tiny_root(data_dir)
-    base = datasets.ImageFolder(root / "train", transform=train_transform(image_size))
+    base = datasets.ImageFolder(root / "train", transform=tiny_train_transform(image_size))
     if task == "rotation":
         return RotationDataset(base), 4
     if task == "jigsaw":
