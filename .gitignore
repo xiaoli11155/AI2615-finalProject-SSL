@@ -2,5 +2,6 @@ __pycache__/
 *.py[cod]
 .venv/
 venv/
-outputs/
+outputs/**/*.pt
+outputs/**/*.pth
 data/
