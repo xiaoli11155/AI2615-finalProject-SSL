@@ -60,31 +60,36 @@ def load_run_series(pretext_root: Path, dataset: str, task: str, metric: str):
     return metric_series(history, metric)
 
 
-def plot_dataset(dataset: str, tasks: list[str], pretext_root: Path, metric: str, output_dir: Path):
-    fig, ax = plt.subplots(figsize=(6.6, 4.8))
+def plot_datasets(datasets: list[str], tasks: list[str], pretext_root: Path, metric: str, output_dir: Path):
+    fig, axes = plt.subplots(1, len(datasets), figsize=(4.5 * len(datasets), 4.8), sharey=True)
+    if len(datasets) == 1:
+        axes = [axes]
     colors = {
         "jigsaw": "#1f77b4",
         "rotation": "#ff7f0e",
         "relative_patch": "#2ca02c",
     }
 
-    for task in tasks:
-        series = load_run_series(pretext_root, dataset, task, metric)
-        if series is None:
-            continue
-        x, y = series
-        ax.plot(x, y, color=colors.get(task), linewidth=2, label=task)
+    for ax, dataset in zip(axes, datasets):
+        for task in tasks:
+            series = load_run_series(pretext_root, dataset, task, metric)
+            if series is None:
+                continue
+            x, y = series
+            ax.plot(x, y, color=colors.get(task), linewidth=2, label=task)
 
-    ax.set_title(dataset)
-    ax.set_xlabel("Epoch")
-    ax.set_ylabel(metric)
-    set_epoch_ticks(ax)
-    ax.grid(True, alpha=0.25)
-    ax.legend(frameon=False)
-    fig.tight_layout(pad=0.8)
+        ax.set_title(dataset)
+        ax.set_xlabel("Epoch")
+        set_epoch_ticks(ax)
+        ax.grid(True, alpha=0.25)
+
+    axes[0].set_ylabel(metric)
+    handles, labels = axes[0].get_legend_handles_labels()
+    fig.legend(handles, labels, loc="lower center", ncol=3, frameon=False, bbox_to_anchor=(0.5, -0.01))
+    fig.tight_layout(rect=(0, 0.08, 1, 1), pad=0.8)
 
     output_dir.mkdir(parents=True, exist_ok=True)
-    out_path = output_dir / f"pretext_{dataset}_{metric}_by_task.png"
+    out_path = output_dir / f"pretext_{metric}_by_task_combined.png"
     fig.savefig(out_path, dpi=200, bbox_inches="tight")
     plt.close(fig)
     return out_path
@@ -96,12 +101,8 @@ def main():
     pretext_root = Path(args.pretext_dir)
     output_dir = Path(args.output_dir)
 
-    generated = []
-    for dataset in args.datasets:
-        generated.append(plot_dataset(dataset, args.tasks, pretext_root, args.metric, output_dir))
-
-    for path in generated:
-        print(path)
+    out_path = plot_datasets(args.datasets, args.tasks, pretext_root, args.metric, output_dir)
+    print(out_path)
 
 
 if __name__ == "__main__":
